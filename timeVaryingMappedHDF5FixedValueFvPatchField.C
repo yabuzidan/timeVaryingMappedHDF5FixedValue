@@ -156,7 +156,7 @@ timeVaryingMappedHDF5FixedValueFvPatchField
     dict.readIfPresent("hdf5SampleTimesDatasetName", hdf5SampleTimesDatasetName_);
     dict.readIfPresent("hdf5FieldValuesDatasetName", hdf5FieldValuesDatasetName_);
 
-    // Check hdf5 file existence (Fixes memory leak)
+    // Check hdf5 file existence
     if (!exists(hdf5FileName_))
     {
         FatalErrorIn
@@ -291,7 +291,6 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::rmap
     endSampleTime_ = -1;       
 }
 
-
 template<class Type>
 void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
 {
@@ -305,7 +304,6 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
     {
 
         hsize_t nPoints[2];
-
 
 
         // Get the size of the points dataset
@@ -353,10 +351,11 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
         Info << "timeVaryingMappedHDF5FixedValueFvPatchField :"
              << " Read " << samplePoints.size() << " points" << endl;
 
-        if (false)
+        if (debug)
         {
             Info << samplePoints << endl;
         }
+
 
         // tbd: run-time selection
         bool nearestOnly =
@@ -475,10 +474,6 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
     offset[1] = 0;
     offset[2] = 0;
 
-    // hsize_t count[3];
-    // count[0] = nVelocity[1];
-    // count[1] = nVelocity[2];
-    // count[2] = 1;
     hsize_t count[3]; // Time, Points, Dims
     count[0] = 1;
     count[1] = nVelocity[1];
@@ -488,8 +483,10 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
     nVelocitySlice[0] = nVelocity[1];
     nVelocitySlice[1] = nVelocity[2];
 
+    // Create a new simple dataspace by the given rank and dims
     hid_t velocityMemspace = H5Screate_simple(2, nVelocitySlice, NULL);
 
+    // Return a copy of the dataspace of the given dataset
     hid_t velocityDataspace = H5Dget_space(velocityDataset);
 
 
@@ -521,7 +518,8 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
                     << endl;
             }
                      
-                                  
+
+
             offset[0] = lo;
 
             hdf5Status = H5Sselect_hyperslab(velocityDataspace, H5S_SELECT_SET, offset, NULL,
@@ -552,39 +550,59 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
             }
 
             // Reread values and interpolate
-            AverageField<Type> vals 
+            IOField<Type> vals
             (
-                nVelocity[1]
-            );
+                IOobject
+                (    
 
-            if (vals.size() != mapperPtr_().sourceSize())
+                    "dummy", //fieldTableName_,
+                    this->db().time().constant(),
+                    "boundaryData"
+                   /this->patch().name()
+                   /sampleTimes_[startSampleTime_].name(),
+                    this->db(),
+                    IOobject::NO_READ,
+                    IOobject::NO_WRITE
+                    //false
+                ),
+                (int)nVelocity[1]
+            );
+ 
+             if (vals.size() != mapperPtr_().sourceSize())
             {
                 FatalErrorIn
                 (
-                    "timeVaryingMappedHDF5FixedValueFvPatchField<Type>::"
+                    "timeVaryingMappedHDF5FixedValueFvPatchField<<Type>::"
                     "checkTable()"
                 )   << "Number of values (" << vals.size()
                     << ") differs from the number of points ("
                     <<  mapperPtr_().sourceSize()
-                    << ") in file " << exit(FatalError);
+                    << ") in file " << vals.objectPath() << exit(FatalError);
             }
-
-
+         
             if (this->db().template 
-                    foundObject<AverageField<vector> >(fieldTableName_))
+                    foundObject<IOField<vector>>("dummy") )
             {
                 Info << "Assigning read velocity values" << endl;
-                AverageField<vector> & field(const_cast<AverageField<vector> &>(this->db().template 
-                        lookupObject<AverageField<vector> >(fieldTableName_)));
+                IOField<vector> & field(const_cast<IOField<vector> &>(this->db().template
+                            lookupObject<IOField<vector> >("dummy")));
                 forAll(vals, i)
                 {
-                field[i][0] = velocity[i][0];
-                field[i][1] = velocity[i][1];
-                field[i][2] = velocity[i][2];
+                    field[i][0] = velocity[i][0];
+                    field[i][1] = velocity[i][1];
+                    field[i][2] = velocity[i][2];
                 }
+                // Info<<"Check table @ lo:"<<vals[100]<<"-("<<velocity[100][0]<<" "<<velocity[100][1]<<" "<<velocity[100][2]<<")\n";
             }
-
-            startAverage_ = vals.average();
+            
+            // TODO: validate averaging functionality
+            if (setAverage_)
+            {
+                AverageField<Type> avals(vals,pTraits<Type>::zero);
+                vals = avals;
+                startAverage_ = avals.average();
+            }
+            
             startSampledValues_ = mapperPtr_().interpolate(vals);
         }
     }
@@ -634,9 +652,21 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
             }
 
             // Reread values and interpolate
-            AverageField<Type> vals 
+            IOField<Type> vals
             (
-                nVelocity[1]
+                IOobject
+                (                 
+                    "dummy", //fieldTableName_,
+                    this->db().time().constant(),
+                    "boundaryData"
+                   /this->patch().name()
+                   /sampleTimes_[endSampleTime_].name(),
+                    this->db(),
+                    IOobject::NO_READ,
+                    IOobject::NO_WRITE
+                    //false
+                ),
+                (int)nVelocity[1]
             );
 
             if (vals.size() != mapperPtr_().sourceSize())
@@ -652,20 +682,28 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
             }
 
             if (this->db().template 
-                    foundObject<AverageField<vector> >(fieldTableName_))
+                    foundObject<IOField<vector>>("dummy") )
             {
                 Info << "Assigning read velocity values" << endl;
-                AverageField<vector> & field(const_cast<AverageField<vector> &>(this->db().template 
-                        lookupObject<AverageField<vector> >(fieldTableName_)));
+                IOField<vector> & field(const_cast<IOField<vector> &>(this->db().template
+                            lookupObject<IOField<vector> >("dummy")));
                 forAll(vals, i)
                 {
-                field[i][0]= velocity[i][0];
-                field[i][1]= velocity[i][1];
-                field[i][2]= velocity[i][2];
+                    field[i][0] = velocity[i][0];
+                    field[i][1] = velocity[i][1];
+                    field[i][2] = velocity[i][2];
                 }
+                // Info<<"Check table @ hi:"<<vals[100]<<"-("<<velocity[100][0]<<" "<<velocity[100][1]<<" "<<velocity[100][2]<<")\n";
             }
 
-            endAverage_ = vals.average();
+            // TODO: validate averaging functionality
+            if (setAverage_)
+            {
+                AverageField<Type> avals(vals,pTraits<Type>::zero);
+                vals = avals;
+                endAverage_ = avals.average();
+            }
+
             endSampledValues_ = mapperPtr_().interpolate(vals);
         }
     }
@@ -825,7 +863,6 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::write(Ostream& os) const
         << token::END_STATEMENT <<nl;
 
     writeEntry(os, "value", *this);
-   
     }
 
 
