@@ -49,6 +49,7 @@ timeVaryingMappedHDF5FixedValueFvPatchField
     fieldTableName_(iF.name()),
     setAverage_(false),
     perturb_(0),
+    recycling_(false),
     mapperPtr_(NULL),
     sampleTimes_(0),
     startSampleTime_(-1),
@@ -77,6 +78,7 @@ timeVaryingMappedHDF5FixedValueFvPatchField
     setAverage_(ptf.setAverage_),
     perturb_(ptf.perturb_),
     mapMethod_(ptf.mapMethod_),
+    recycling_(ptf.recycling_),
     mapperPtr_(NULL),
     sampleTimes_(0),
     startSampleTime_(-1),
@@ -119,6 +121,7 @@ timeVaryingMappedHDF5FixedValueFvPatchField
             "planarInterpolation"
         )
     ),
+    recycling_(dict.lookupOrDefault("recycling", false)),
     mapperPtr_(NULL),
     sampleTimes_(0),
     startSampleTime_(-1),
@@ -194,6 +197,7 @@ timeVaryingMappedHDF5FixedValueFvPatchField
     setAverage_(ptf.setAverage_),
     perturb_(ptf.perturb_),
     mapMethod_(ptf.mapMethod_),
+    recycling_(ptf.recycling_),
     mapperPtr_(NULL),
     sampleTimes_(ptf.sampleTimes_),
     startSampleTime_(ptf.startSampleTime_),
@@ -418,14 +422,51 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
     label lo = -1;
     label hi = -1;
 
+    scalar period = sampleTimes_[sampleTimes_.size()-1].value()-sampleTimes_[0].value();
+    
+    scalar dbTime = this->db().time().value();
+    
+    // Take remainder
+    scalar seekTime;
+    //Info<<"Test:"<<recycling_<<endl;
+    if (recycling_)
+    {
+        seekTime= dbTime - int(dbTime/period)*period;
+    }
+    else
+    {
+        seekTime = dbTime;
+    }
+
+    if (seekTime < this->db().time().deltaTValue())
+    {   
+        // Avoid numerical error
+        seekTime = 0.0;
+
+        startSampleTime_ = -1;
+        endSampleTime_ = -1;
+    }
     bool foundTime = mapperPtr_().findTime
     (
         sampleTimes_,
         startSampleTime_,
-        this->db().time().value(),
+        seekTime,//this->db().time().value(),
         lo,
         hi
     );
+
+
+    if (1)
+    {
+        Info<<" Debug Recycling:"
+            <<" Current time:"<<dbTime
+            <<" Current deltaT:"<<this->db().time().deltaTValue()
+            <<",seekTime:"<<seekTime
+            <<",found:"<<foundTime
+            <<",lo:"<<lo<<",hi:"<<hi
+            <<",startSampleTime:" <<startSampleTime_
+            <<",endSampleTime:"<<endSampleTime_<<"\n"; 
+    }
 
     if (!foundTime)
     {
@@ -746,10 +787,29 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::updateCoeffs()
     }
     else
     {
+        scalar period = sampleTimes_[sampleTimes_.size()-1].value()-sampleTimes_[0].value();
+        scalar dbTime = this->db().time().value();
+
+        // Take remainder
+        scalar seekTime;        
+        if (recycling_)
+        {
+            seekTime = dbTime - int(dbTime/period)*period;
+        }
+        else
+        {
+            seekTime = dbTime;
+        }
+
+        if (seekTime < this->db().time().deltaTValue())
+        {
+            seekTime = 0.0;
+        }
+
         scalar start = sampleTimes_[startSampleTime_].value();
         scalar end = sampleTimes_[endSampleTime_].value();
 
-        scalar s = (this->db().time().value() - start)/(end - start);
+        scalar s = (seekTime - start)/(end - start);
 
         if (debug)
         {
@@ -757,6 +817,7 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::updateCoeffs()
                 << " between start time:"
                 << sampleTimes_[startSampleTime_].name()
                 << " and end time:" << sampleTimes_[endSampleTime_].name()
+                << " for seek time:"<< seekTime
                 << " with weight:" << s << endl;
         }
 
@@ -845,6 +906,9 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::write(Ostream& os) const
         word("planarInterpolation"),
         mapMethod_
     );
+
+
+    writeEntryIfDifferent(os, "recycling", Switch(false), recycling_);
 
     if (offset_.valid())
     {
