@@ -57,6 +57,7 @@ inlet
     setAverage      false;
     offset          (0 0 0);
     perturb         0.0;
+    recycling       true;
     hdf5FileName    "dbTest.hdf5";
     hdf5PointsDatasetName    "points";
     hdf5SampleTimesDatasetName    "time";
