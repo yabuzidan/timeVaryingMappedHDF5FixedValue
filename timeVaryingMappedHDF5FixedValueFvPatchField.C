@@ -456,7 +456,7 @@ void timeVaryingMappedHDF5FixedValueFvPatchField<Type>::checkTable()
     );
 
 
-    if (1)
+    if (debug)
     {
         Info<<" Debug Recycling:"
             <<" Current time:"<<dbTime
